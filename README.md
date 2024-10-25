@@ -1,4 +1,4 @@
-# OwnCloud-Docker-Compose
+# Owncloud-Docker-Compose
 Fully Configured Owncloud Installation behind a Reverse Proxy with Onlyoffice enabled
 
 ### Letsencrypt Container
