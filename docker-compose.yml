@@ -1,0 +1,137 @@
+version: '3'
+services:
+
+  proxy:
+    image: nginxproxy/nginx-proxy:alpine
+    container_name: proxy
+    networks:
+      - encrypt_network
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./proxy/conf.d:/etc/nginx/conf.d:rw
+      - ./proxy/vhost.d:/etc/nginx/vhost.d:rw
+      - ./proxy/html:/usr/share/nginx/html:rw
+      - ./proxy/certs:/etc/nginx/certs:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - ./my_custom_proxy_settings.conf:/etc/nginx/conf.d/my_custom_proxy_settings.conf
+    restart: unless-stopped
+    environment:
+      - ENABLE_IPV6=true  # Optional: Enable IPv6 support if needed
+      - TRUST_DOWNSTREAM_PROXY=false #Disable if installation is behind a proxy
+
+  letsencrypt:
+    image: nginxproxy/acme-companion:latest
+    container_name: letsencrypt
+    depends_on:
+      - proxy
+    networks:
+      - encrypt_network
+    environment:
+      - NGINX_PROXY_CONTAINER=proxy
+      - DEFAULT_EMAIL=EXAMPLE@EMAIL.COM
+    volumes:
+      - ./proxy/certs:/etc/nginx/certs:rw
+      - ./proxy/vhost.d:/etc/nginx/vhost.d:rw
+      - ./proxy/html:/usr/share/nginx/html:rw
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  owncloud:
+    image: owncloud/server:latest
+    container_name: owncloud
+    networks:
+      - encrypt_network
+      - oc_db
+    expose:
+    - "8080"
+    depends_on:
+      - proxy
+      - letsencrypt
+      - owncloud-db
+      - owncloud-redis
+    environment:
+      - VIRTUAL_HOST=example.domain.com
+      - LETSENCRYPT_HOST=example.domain.com
+      - VIRTUAL_PORT=8080
+      - OWNCLOUD_DB_TYPE=mysql
+      - OWNCLOUD_DB_HOST=owncloud-db # hostname for owncloud setup
+      - OWNCLOUD_DB_NAME=owncloud # DB name for owncloud setup
+      - OWNCLOUD_DB_USERNAME=owncloud_user # DB User for owncloud setup
+      - OWNCLOUD_DB_PASSWORD=${MYSQL_PASSWORD} # DB Password for owncloud setup
+      - OWNCLOUD_DOMAIN=example.domain.com
+      - OWNCLOUD_TRUSTED_DOMAINS=example.domain.com,office.example.com,
+      - OWNCLOUD_ADMIN_USERNAME=ExampleAdmin # Owncloud user account with Admin permissions
+      - OWNCLOUD_ADMIN_PASSWORD=${OWNCLOUD_ADMIN_PASSWORD}
+      - OWNCLOUD_MYSQL_UTF8MB4=true
+      - OWNCLOUD_REDIS_ENABLED=true
+      - OWNCLOUD_REDIS_HOST=owncloud-redis
+    healthcheck:
+      test: ["CMD", "/usr/bin/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - files:/mnt/data
+    restart: unless-stopped
+
+  owncloud-db:
+    image: mariadb:latest
+    container_name: owncloud-db
+    networks: 
+      - oc_db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: owncloud
+      MYSQL_USER: owncloud_user
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MARIADB_AUTO_UPGRADE: 1
+    command: ["--max-allowed-packet=128M", "--innodb-log-file-size=64M"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-u", "root", "--password=${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - mysql:/var/lib/mysql
+    restart: unless-stopped
+
+  owncloud-redis:
+    image: redis:alpine
+    container_name: owncloud-redis
+    networks:
+      - oc_db
+    command: ["--databases", "1"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  onlyoffice:
+    image: onlyoffice/documentserver
+    container_name: onlyoffice
+    networks:
+      - encrypt_network
+    environment:
+      - VIRTUAL_HOST=office.example.com
+      - LETSENCRYPT_HOST=office.example.com
+      - JWT_ENABLED=true
+      - JWT_SECRET=${JWT_SECRET}
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+volumes:
+  redis-data:
+  files:
+  mysql:
+networks:
+  encrypt_network:
+    driver: bridge
+  oc_db: bridge
