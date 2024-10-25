@@ -134,4 +134,5 @@ volumes:
 networks:
   encrypt_network:
     driver: bridge
-  oc_db: bridge
+  oc_db:
+    driver: bridge
